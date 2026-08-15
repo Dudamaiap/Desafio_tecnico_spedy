@@ -1,7 +1,13 @@
 const Database = require('better-sqlite3');
-const db = new Database('reservas.db');
+const path = require('path');
 
-// tabela de salas 
+const dbPath = process.env.DB_PATH || path.join(__dirname, 'reservas.db');
+const db = new Database(dbPath);
+
+// Ativa foreign keys no SQLite
+db.pragma('foreign_keys = ON');
+
+// Criar tabela de salas
 db.exec(`
   CREATE TABLE IF NOT EXISTS salas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -9,7 +15,7 @@ db.exec(`
   )
 `);
 
-// tabela de reservas 
+// Criar tabela de reservas
 db.exec(`
   CREATE TABLE IF NOT EXISTS reservas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -18,19 +24,37 @@ db.exec(`
     inicio TEXT NOT NULL,
     fim TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'ativa',
-    FOREIGN KEY (sala_id) REFERENCES salas(id)
+    criado_em TEXT DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (sala_id) REFERENCES salas(id) ON DELETE CASCADE
   )
 `);
 
-module.exports = db;
+// Migração: verificar se a coluna criado_em já existe na tabela reservas
+const colunasReservas = db.prepare("PRAGMA table_info(reservas)").all();
+const possuiCriadoEm = colunasReservas.some((col) => col.name === 'criado_em');
 
-// Verifica se já existem salas cadastradas
+if (!possuiCriadoEm) {
+  try {
+    db.exec("ALTER TABLE reservas ADD COLUMN criado_em TEXT DEFAULT CURRENT_TIMESTAMP");
+  } catch (err) {
+    // Ignorar erro caso a coluna já exista em concorrência
+  }
+}
+
+// Seed de salas padrão caso o banco esteja vazio
 const totalSalas = db.prepare('SELECT COUNT(*) AS total FROM salas').get();
 
 if (totalSalas.total === 0) {
   const inserirSala = db.prepare('INSERT INTO salas (nome) VALUES (?)');
-  inserirSala.run('Sala 1');
-  inserirSala.run('Sala 2');
-  inserirSala.run('Sala 3');
-  console.log('Salas inseridas com sucesso!');
+  const salasPadrao = [
+    'Sala Inovação (Capacidade: 6p)',
+    'Sala Foco (Capacidade: 4p)',
+    'Sala Diretoria (Capacidade: 12p)',
+    'Auditório Principal (Capacidade: 30p)'
+  ];
+
+  salasPadrao.forEach((nome) => inserirSala.run(nome));
+  console.log('Salas padrão cadastradas com sucesso!');
 }
+
+module.exports = db;
