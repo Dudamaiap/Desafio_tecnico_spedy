@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 // Logo oficial com o laço gradiente "S" da Spedy (idêntico ao spedy.com.br)
@@ -91,16 +91,26 @@ const IconTrash = () => (
   </svg>
 );
 
+const IconBell = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15 17h5l-1.4-1.4a2 2 0 0 1-.6-1.42V11a6 6 0 1 0-12 0v3.18a2 2 0 0 1-.6 1.42L4 17h5"></path>
+    <path d="M10 17a2 2 0 0 0 4 0"></path>
+  </svg>
+);
+
 // Imagens reais de salas corporativas
 const FOTOS_SALAS = {
   1: 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?auto=format&fit=crop&w=600&q=80',
   2: 'https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=600&q=80',
   3: 'https://images.unsplash.com/photo-1577412647305-991150c7d163?auto=format&fit=crop&w=600&q=80',
 };
+const API_BASE_URL = 'http://localhost:3000';
+const NOTIFICATION_REFRESH_MS = 60000;
 
 function App() {
   const [salas, setSalas] = useState([]);
   const [reservas, setReservas] = useState([]);
+  const [notificacoes, setNotificacoes] = useState([]);
   
   // Formulário
   const [salaId, setSalaId] = useState('');
@@ -114,6 +124,11 @@ function App() {
   const [carregando, setCarregando] = useState(false);
   const [modalCriarAberto, setModalCriarAberto] = useState(false);
   const [modalCancelamento, setModalCancelamento] = useState({ aberto: false, id: null, titulo: '' });
+  const [painelNotificacoesAberto, setPainelNotificacoesAberto] = useState(false);
+  const [carregandoNotificacoes, setCarregandoNotificacoes] = useState(false);
+  const [erroNotificacoes, setErroNotificacoes] = useState('');
+  const [marcandoNotificacoes, setMarcandoNotificacoes] = useState(false);
+  const painelNotificacoesRef = useRef(null);
 
   // Calendário Interativo
   const [dataCalendario, setDataCalendario] = useState(new Date(2026, 7, 1)); // Mês base: Agosto 2026
@@ -121,7 +136,7 @@ function App() {
   const [filtroAtivo, setFiltroAtivo] = useState(false); // Flag de filtro ativado
 
   function buscarSalas() {
-    fetch('http://localhost:3000/salas')
+    fetch(`${API_BASE_URL}/salas`)
       .then((res) => res.json())
       .then((dados) => {
         if (Array.isArray(dados)) {
@@ -135,7 +150,7 @@ function App() {
   }
 
   function buscarReservas() {
-    fetch('http://localhost:3000/reservas')
+    fetch(`${API_BASE_URL}/reservas`)
       .then((res) => res.json())
       .then((dados) => {
         if (Array.isArray(dados)) {
@@ -149,9 +164,102 @@ function App() {
       });
   }
 
+  function buscarNotificacoes(opcoes = {}) {
+    const { silencioso = false } = opcoes;
+
+    if (!silencioso) {
+      setCarregandoNotificacoes(true);
+    }
+
+    fetch(`${API_BASE_URL}/notificacoes?limite=12`)
+      .then((res) => res.json().then((dados) => ({ status: res.status, dados })))
+      .then(({ status, dados }) => {
+        if (status !== 200 || !Array.isArray(dados)) {
+          setErroNotificacoes('Não foi possível carregar as notificações.');
+          return;
+        }
+
+        setNotificacoes(dados);
+        setErroNotificacoes('');
+      })
+      .catch((err) => {
+        console.error('Erro ao buscar notificações:', err);
+        setErroNotificacoes('Não foi possível carregar as notificações.');
+      })
+      .finally(() => {
+        if (!silencioso) {
+          setCarregandoNotificacoes(false);
+        }
+      });
+  }
+
+  function marcarNotificacoesComoLidas(ids = []) {
+    const possuiIds = Array.isArray(ids) && ids.length > 0;
+    setMarcandoNotificacoes(true);
+
+    fetch(`${API_BASE_URL}/notificacoes/marcar-lidas`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(possuiIds ? { ids } : {}),
+    })
+      .then((res) => res.json().then((dados) => ({ status: res.status, dados })))
+      .then(({ status, dados }) => {
+        setMarcandoNotificacoes(false);
+
+        if (status !== 200) {
+          setErroNotificacoes(dados.erro || 'Não foi possível atualizar as notificações.');
+          return;
+        }
+
+        setErroNotificacoes('');
+        buscarNotificacoes({ silencioso: true });
+      })
+      .catch((err) => {
+        console.error('Erro ao marcar notificações como lidas:', err);
+        setMarcandoNotificacoes(false);
+        setErroNotificacoes('Não foi possível atualizar as notificações.');
+      });
+  }
+
   useEffect(() => {
     buscarSalas();
     buscarReservas();
+    buscarNotificacoes({ silencioso: true });
+
+    const intervalId = window.setInterval(() => {
+      buscarReservas();
+      buscarNotificacoes({ silencioso: true });
+    }, NOTIFICATION_REFRESH_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    if (painelNotificacoesAberto) {
+      buscarNotificacoes();
+    }
+  }, [painelNotificacoesAberto]);
+
+  useEffect(() => {
+    function fecharPainelAoClicarFora(event) {
+      if (painelNotificacoesRef.current && !painelNotificacoesRef.current.contains(event.target)) {
+        setPainelNotificacoesAberto(false);
+      }
+    }
+
+    function fecharPainelComEscape(event) {
+      if (event.key === 'Escape') {
+        setPainelNotificacoesAberto(false);
+      }
+    }
+
+    document.addEventListener('mousedown', fecharPainelAoClicarFora);
+    document.addEventListener('keydown', fecharPainelComEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', fecharPainelAoClicarFora);
+      document.removeEventListener('keydown', fecharPainelComEscape);
+    };
   }, []);
 
   function handleCriarReserva(e) {
@@ -179,7 +287,7 @@ function App() {
 
     setCarregando(true);
 
-    fetch('http://localhost:3000/reservas', {
+    fetch(`${API_BASE_URL}/reservas`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -201,6 +309,7 @@ function App() {
           setFim('');
           setModalCriarAberto(false);
           buscarReservas();
+          buscarNotificacoes({ silencioso: true });
         }
       })
       .catch(() => {
@@ -213,7 +322,7 @@ function App() {
     const { id } = modalCancelamento;
     if (!id) return;
 
-    fetch(`http://localhost:3000/reservas/${id}/cancelar`, {
+    fetch(`${API_BASE_URL}/reservas/${id}/cancelar`, {
       method: 'PATCH',
     })
       .then((res) => res.json())
@@ -224,6 +333,7 @@ function App() {
         } else {
           setSucesso('Reserva cancelada com sucesso.');
           buscarReservas();
+          buscarNotificacoes({ silencioso: true });
         }
       })
       .catch(() => {
@@ -294,6 +404,59 @@ function App() {
     };
   }
 
+  function converterDataReserva(dataHora) {
+    return new Date(dataHora.includes('T') ? dataHora : dataHora.replace(' ', 'T'));
+  }
+
+  function converterDataNotificacao(dataHora) {
+    return new Date(dataHora.includes('T') ? dataHora : dataHora.replace(' ', 'T'));
+  }
+
+  function formatarMomentoNotificacao(dataHora) {
+    const data = converterDataNotificacao(dataHora);
+    const agoraLocal = new Date();
+    const hora = data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    if (data.toDateString() === agoraLocal.toDateString()) {
+      return `Hoje às ${hora}`;
+    }
+
+    return `${data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${hora}`;
+  }
+
+  function obterEstiloNotificacao(tipo) {
+    if (tipo === 'cancelamento') {
+      return 'alert';
+    }
+
+    if (tipo === 'lembrete_1h') {
+      return 'upcoming';
+    }
+
+    if (tipo === 'lembrete_24h') {
+      return 'info';
+    }
+
+    if (tipo === 'reserva_criada') {
+      return 'live';
+    }
+
+    return 'history';
+  }
+
+  const agora = new Date();
+  const reservasOrdenadas = [...reservas].sort((a, b) => converterDataReserva(a.inicio) - converterDataReserva(b.inicio));
+  const reservasFuturas = reservasOrdenadas.filter((reserva) => converterDataReserva(reserva.fim) >= agora);
+  const reservasHoje = reservas.filter((reserva) => converterDataReserva(reserva.inicio).toDateString() === agora.toDateString()).length;
+  const reservasConcluidasMes = reservas.filter((reserva) => {
+    const fimReserva = converterDataReserva(reserva.fim);
+    return fimReserva < agora && fimReserva.getMonth() === agora.getMonth() && fimReserva.getFullYear() === agora.getFullYear();
+  }).length;
+  const notificacoesNaoLidas = notificacoes.filter((notificacao) => !notificacao.lida);
+  const totalNotificacoes = notificacoes.length;
+  const totalNotificacoesNaoLidas = notificacoesNaoLidas.length;
+  const badgeNotificacoes = totalNotificacoesNaoLidas > 9 ? '9+' : String(totalNotificacoesNaoLidas);
+
   // Renderizar a grade de dias do calendário
   function renderizarDiasCalendario() {
     const celulas = [];
@@ -337,6 +500,93 @@ function App() {
           <SpedyLogo />
 
           <div className="spedy-header-actions">
+            <div
+              className={`spedy-notification-wrap ${painelNotificacoesAberto ? 'open' : ''}`}
+              ref={painelNotificacoesRef}
+            >
+              <button
+                type="button"
+                className="spedy-notification-button"
+                aria-label="Abrir notificações"
+                aria-expanded={painelNotificacoesAberto}
+                onClick={() => setPainelNotificacoesAberto((aberto) => !aberto)}
+              >
+                <IconBell />
+                {totalNotificacoesNaoLidas > 0 && (
+                  <span className="spedy-notification-badge">{badgeNotificacoes}</span>
+                )}
+              </button>
+
+              {painelNotificacoesAberto && (
+                <div className="spedy-notification-panel">
+                  <div className="spedy-notification-panel-header">
+                    <div>
+                      <div className="spedy-notification-panel-title">Notificações</div>
+                      <div className="spedy-notification-panel-subtitle">
+                        {totalNotificacoesNaoLidas > 0
+                          ? `${totalNotificacoesNaoLidas} não lida${totalNotificacoesNaoLidas === 1 ? '' : 's'}`
+                          : totalNotificacoes > 0
+                            ? 'Todas as notificações foram lidas'
+                            : 'Sem novidades no momento'}
+                      </div>
+                    </div>
+
+                    {totalNotificacoesNaoLidas > 0 && (
+                      <button
+                        type="button"
+                        className="spedy-notification-mark-read"
+                        onClick={() => marcarNotificacoesComoLidas()}
+                        disabled={marcandoNotificacoes}
+                      >
+                        {marcandoNotificacoes ? 'Salvando...' : 'Marcar todas'}
+                      </button>
+                    )}
+                  </div>
+
+                  {carregandoNotificacoes && notificacoes.length === 0 ? (
+                    <div className="spedy-notification-empty">
+                      Carregando notificações...
+                    </div>
+                  ) : erroNotificacoes ? (
+                    <div className="spedy-notification-empty">
+                      {erroNotificacoes}
+                    </div>
+                  ) : notificacoes.length === 0 ? (
+                    <div className="spedy-notification-empty">
+                      Suas próximas atualizações de reserva vão aparecer aqui.
+                    </div>
+                  ) : (
+                    <div className="spedy-notification-list">
+                      {notificacoes.map((notificacao) => (
+                        <button
+                          type="button"
+                          key={notificacao.id}
+                          className={`spedy-notification-item ${obterEstiloNotificacao(notificacao.tipo)} ${notificacao.lida ? 'read' : 'unread'}`}
+                          onClick={() => {
+                            if (!notificacao.lida && !marcandoNotificacoes) {
+                              marcarNotificacoesComoLidas([notificacao.id]);
+                            }
+                          }}
+                        >
+                          <span className="spedy-notification-dot" />
+                          <div className="spedy-notification-item-content">
+                            <div className="spedy-notification-item-top">
+                              <div className="spedy-notification-item-title">{notificacao.titulo}</div>
+                              <div className="spedy-notification-item-time">{formatarMomentoNotificacao(notificacao.criado_em)}</div>
+                            </div>
+                            {!notificacao.lida && (
+                              <div className="spedy-notification-item-tag">Nova</div>
+                            )}
+                            <div className="spedy-notification-item-copy">{notificacao.descricao}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <button
               className="btn-spedy-magenta"
               onClick={() => setModalCriarAberto(true)}
@@ -437,19 +687,19 @@ function App() {
 
           <div className="spedy-stat-card">
             <div className="stat-icon-pill magenta"><IconCalendar /></div>
-            <div className="stat-number-bold">{reservas.length}</div>
+            <div className="stat-number-bold">{reservasHoje}</div>
             <div className="stat-title-label">Reservas hoje</div>
           </div>
 
           <div className="spedy-stat-card">
             <div className="stat-icon-pill"><IconClock /></div>
-            <div className="stat-number-bold">5</div>
+            <div className="stat-number-bold">{reservasFuturas.length}</div>
             <div className="stat-title-label">Próximas reservas</div>
           </div>
 
           <div className="spedy-stat-card">
             <div className="stat-icon-pill magenta"><IconCheckCircle /></div>
-            <div className="stat-number-bold">12</div>
+            <div className="stat-number-bold">{reservasConcluidasMes}</div>
             <div className="stat-title-label">Concluídas este mês</div>
           </div>
         </div>

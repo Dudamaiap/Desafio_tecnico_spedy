@@ -29,6 +29,22 @@ db.exec(`
   )
 `);
 
+// Criar tabela de notificações
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notificacoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reserva_id INTEGER,
+    evento_chave TEXT NOT NULL UNIQUE,
+    tipo TEXT NOT NULL,
+    titulo TEXT NOT NULL,
+    descricao TEXT NOT NULL,
+    lida INTEGER NOT NULL DEFAULT 0 CHECK (lida IN (0, 1)),
+    criado_em TEXT DEFAULT (datetime('now', 'localtime')),
+    lida_em TEXT,
+    FOREIGN KEY (reserva_id) REFERENCES reservas(id) ON DELETE SET NULL
+  )
+`);
+
 // Migração: verificar se a coluna criado_em já existe na tabela reservas
 const colunasReservas = db.prepare("PRAGMA table_info(reservas)").all();
 const possuiCriadoEm = colunasReservas.some((col) => col.name === 'criado_em');

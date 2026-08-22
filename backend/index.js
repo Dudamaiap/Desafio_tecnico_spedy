@@ -3,9 +3,124 @@ const cors = require('cors');
 const db = require('./db');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+function converterParaData(valor) {
+  return new Date(valor.includes('T') ? valor : valor.replace(' ', 'T'));
+}
+
+function formatarDataHoraCurta(valor) {
+  return converterParaData(valor).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+function formatarHorarioCurto(valor) {
+  return converterParaData(valor).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatarFaixaDaReserva(inicio, fim) {
+  return `${formatarDataHoraCurta(inicio)} das ${formatarHorarioCurto(inicio)} às ${formatarHorarioCurto(fim)}`;
+}
+
+function formatarDataHoraComparavel(data) {
+  const ano = data.getFullYear();
+  const mes = String(data.getMonth() + 1).padStart(2, '0');
+  const dia = String(data.getDate()).padStart(2, '0');
+  const hora = String(data.getHours()).padStart(2, '0');
+  const minuto = String(data.getMinutes()).padStart(2, '0');
+
+  return `${ano}-${mes}-${dia}T${hora}:${minuto}`;
+}
+
+function criarNotificacao({ reservaId = null, eventoChave, tipo, titulo, descricao }) {
+  db.prepare(`
+    INSERT OR IGNORE INTO notificacoes (
+      reserva_id,
+      evento_chave,
+      tipo,
+      titulo,
+      descricao
+    )
+    VALUES (?, ?, ?, ?, ?)
+  `).run(reservaId, eventoChave, tipo, titulo, descricao);
+}
+
+function garantirNotificacoesDeLembrete() {
+  const agora = new Date();
+  const limite24h = new Date(agora.getTime() + 24 * 60 * 60 * 1000);
+
+  const reservasProximas = db.prepare(`
+    SELECT reservas.id,
+           reservas.titulo,
+           reservas.inicio,
+           reservas.fim,
+           salas.nome AS sala_nome
+    FROM reservas
+    JOIN salas ON reservas.sala_id = salas.id
+    WHERE reservas.status = 'ativa'
+      AND reservas.fim >= ?
+      AND reservas.inicio <= ?
+    ORDER BY reservas.inicio ASC
+  `).all(formatarDataHoraComparavel(agora), formatarDataHoraComparavel(limite24h));
+
+  reservasProximas.forEach((reserva) => {
+    const inicioReserva = converterParaData(reserva.inicio);
+    const diferencaMs = inicioReserva.getTime() - agora.getTime();
+
+    if (diferencaMs <= 0) {
+      return;
+    }
+
+    if (diferencaMs <= 60 * 60 * 1000) {
+      criarNotificacao({
+        reservaId: reserva.id,
+        eventoChave: `reserva-${reserva.id}-lembrete-1h`,
+        tipo: 'lembrete_1h',
+        titulo: 'Sua reunião está próxima',
+        descricao: `"${reserva.titulo}" começa às ${formatarHorarioCurto(reserva.inicio)} de ${formatarDataHoraCurta(reserva.inicio)} na ${reserva.sala_nome}.`,
+      });
+      return;
+    }
+
+    criarNotificacao({
+      reservaId: reserva.id,
+      eventoChave: `reserva-${reserva.id}-lembrete-24h`,
+      tipo: 'lembrete_24h',
+      titulo: 'Lembrete da sua próxima reserva',
+      descricao: `"${reserva.titulo}" está agendada para ${formatarFaixaDaReserva(reserva.inicio, reserva.fim)} na ${reserva.sala_nome}.`,
+    });
+  });
+}
+
+function listarNotificacoes(limite = 12) {
+  garantirNotificacoesDeLembrete();
+
+  return db.prepare(`
+    SELECT id,
+           reserva_id,
+           tipo,
+           titulo,
+           descricao,
+           lida,
+           criado_em,
+           lida_em
+    FROM notificacoes
+    ORDER BY lida ASC, datetime(criado_em) DESC, id DESC
+    LIMIT ?
+  `).all(limite).map((notificacao) => ({
+    ...notificacao,
+    lida: Boolean(notificacao.lida),
+  }));
+}
 
 // Rota raiz para verificação de status do servidor
 app.get('/', (req, res) => {
@@ -50,6 +165,78 @@ app.get('/reservas', (req, res) => {
   } catch (erro) {
     console.error('Erro ao buscar reservas:', erro);
     res.status(500).json({ erro: 'Erro interno ao consultar reservas.' });
+  }
+});
+
+/**
+ * GET /notificacoes
+ * Retorna as notificações persistidas, incluindo itens não lidos, cancelamentos e lembretes.
+ */
+app.get('/notificacoes', (req, res) => {
+  try {
+    const limiteBruto = Number(req.query.limite);
+    const limite = Number.isInteger(limiteBruto)
+      ? Math.min(Math.max(limiteBruto, 1), 50)
+      : 12;
+
+    const notificacoes = listarNotificacoes(limite);
+    res.json(notificacoes);
+  } catch (erro) {
+    console.error('Erro ao buscar notificações:', erro);
+    res.status(500).json({ erro: 'Erro interno ao consultar notificações.' });
+  }
+});
+
+/**
+ * PATCH /notificacoes/marcar-lidas
+ * Marca uma ou mais notificações como lidas. Se nenhum id for enviado, marca todas.
+ */
+app.patch('/notificacoes/marcar-lidas', (req, res) => {
+  try {
+    const idsEnviados = req.body && Array.isArray(req.body.ids) ? req.body.ids : null;
+
+    if (idsEnviados && idsEnviados.length === 0) {
+      return res.status(400).json({ erro: 'Informe ao menos um id de notificação.' });
+    }
+
+    if (idsEnviados) {
+      const ids = idsEnviados
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id > 0);
+
+      if (ids.length !== idsEnviados.length) {
+        return res.status(400).json({ erro: 'A lista de ids enviada é inválida.' });
+      }
+
+      const placeholders = ids.map(() => '?').join(', ');
+      const resultado = db.prepare(`
+        UPDATE notificacoes
+        SET lida = 1,
+            lida_em = datetime('now', 'localtime')
+        WHERE lida = 0
+          AND id IN (${placeholders})
+      `).run(...ids);
+
+      return res.json({
+        mensagem: 'Notificações selecionadas marcadas como lidas.',
+        total_atualizadas: resultado.changes,
+      });
+    }
+
+    const resultado = db.prepare(`
+      UPDATE notificacoes
+      SET lida = 1,
+          lida_em = datetime('now', 'localtime')
+      WHERE lida = 0
+    `).run();
+
+    return res.json({
+      mensagem: 'Todas as notificações foram marcadas como lidas.',
+      total_atualizadas: resultado.changes,
+    });
+  } catch (erro) {
+    console.error('Erro ao marcar notificações como lidas:', erro);
+    return res.status(500).json({ erro: 'Erro interno ao atualizar notificações.' });
   }
 });
 
@@ -125,10 +312,24 @@ app.post('/reservas', (req, res) => {
       INSERT INTO reservas (sala_id, titulo, inicio, fim, status)
       VALUES (?, ?, ?, ?, 'ativa')
     `);
-    const resultado = inserir.run(sala_id, titulo.trim(), inicio, fim);
+    const criarReservaComNotificacao = db.transaction(() => {
+      const resultado = inserir.run(sala_id, titulo.trim(), inicio, fim);
+      const reservaId = Number(resultado.lastInsertRowid);
+
+      criarNotificacao({
+        reservaId,
+        eventoChave: `reserva-${reservaId}-criada`,
+        tipo: 'reserva_criada',
+        titulo: 'Nova reserva confirmada',
+        descricao: `"${titulo.trim()}" foi agendada na ${salaExistente.nome} para ${formatarFaixaDaReserva(inicio, fim)}.`,
+      });
+
+      return reservaId;
+    });
+    const reservaId = criarReservaComNotificacao();
 
     const novaReserva = {
-      id: resultado.lastInsertRowid,
+      id: reservaId,
       sala_id,
       sala_nome: salaExistente.nome,
       titulo: titulo.trim(),
@@ -153,7 +354,13 @@ app.patch('/reservas/:id/cancelar', (req, res) => {
   try {
     const { id } = req.params;
 
-    const reserva = db.prepare('SELECT * FROM reservas WHERE id = ?').get(id);
+    const reserva = db.prepare(`
+      SELECT reservas.*,
+             salas.nome AS sala_nome
+      FROM reservas
+      JOIN salas ON reservas.sala_id = salas.id
+      WHERE reservas.id = ?
+    `).get(id);
 
     if (!reserva) {
       return res.status(404).json({ erro: 'Reserva não encontrada.' });
@@ -163,7 +370,27 @@ app.patch('/reservas/:id/cancelar', (req, res) => {
       return res.status(400).json({ erro: 'Esta reserva já se encontra cancelada.' });
     }
 
-    db.prepare(`UPDATE reservas SET status = 'cancelada' WHERE id = ?`).run(id);
+    const cancelarReservaComNotificacao = db.transaction(() => {
+      db.prepare(`UPDATE reservas SET status = 'cancelada' WHERE id = ?`).run(id);
+      db.prepare(`
+        UPDATE notificacoes
+        SET lida = 1,
+            lida_em = datetime('now', 'localtime')
+        WHERE reserva_id = ?
+          AND tipo IN ('lembrete_1h', 'lembrete_24h')
+          AND lida = 0
+      `).run(id);
+
+      criarNotificacao({
+        reservaId: Number(id),
+        eventoChave: `reserva-${id}-cancelada`,
+        tipo: 'cancelamento',
+        titulo: 'Reserva cancelada',
+        descricao: `"${reserva.titulo}" na ${reserva.sala_nome} foi cancelada. O horário de ${formatarFaixaDaReserva(reserva.inicio, reserva.fim)} ficou disponível novamente.`,
+      });
+    });
+
+    cancelarReservaComNotificacao();
 
     return res.json({ 
       mensagem: 'Reserva cancelada com sucesso.',
@@ -176,7 +403,10 @@ app.patch('/reservas/:id/cancelar', (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor backend rodando com sucesso na porta ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Servidor backend rodando com sucesso na porta ${PORT}`);
+  });
+}
+
+module.exports = app;
