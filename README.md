@@ -1,10 +1,10 @@
-# 🏢 Spedy Coworking - Sistema de Gestão de Reservas
+#  Spedy Coworking - Sistema de Gestão de Reservas
 
 Aplicação web completa desenvolvida para o **Desafio Técnico Spedy**, voltada ao gerenciamento corporativo de reservas de salas de reunião em espaços de coworking.
 
 ---
 
-## 🛠️ Tecnologias Utilizadas
+##  Tecnologias Utilizadas
 
 - **Front-end**: React 19, Vite, HTML5, Vanilla CSS (Design System escuro moderno com Glassmorphism e Google Fonts `Outfit` + `Plus Jakarta Sans`).
 - **Back-end**: Node.js, Express (v5), CORS.
@@ -12,7 +12,7 @@ Aplicação web completa desenvolvida para o **Desafio Técnico Spedy**, voltada
 
 ---
 
-## 🚀 Como Rodar o Projeto
+##  Como Rodar o Projeto
 
 ### Pré-requisitos
 - Node.js (versão 18 ou superior)
@@ -20,7 +20,7 @@ Aplicação web completa desenvolvida para o **Desafio Técnico Spedy**, voltada
 
 ---
 
-### 1️⃣ Executando o Back-end
+### 1️ Executando o Back-end
 
 1. Acesse o diretório do backend:
    ```bash
@@ -38,7 +38,7 @@ Aplicação web completa desenvolvida para o **Desafio Técnico Spedy**, voltada
 
 ---
 
-### 2️⃣ Executando o Front-end
+### 2️ Executando o Front-end
 
 1. Em um novo terminal, acesse o diretório do frontend:
    ```bash
@@ -56,7 +56,7 @@ Aplicação web completa desenvolvida para o **Desafio Técnico Spedy**, voltada
 
 ---
 
-## 🧠 Justificativa da Decisão de Cancelamento: Soft Delete vs Hard Delete
+##  Justificativa da Decisão de Cancelamento: Soft Delete vs Hard Delete
 
 ### **Decisão Adotada: Soft Delete (`status = 'cancelada'`)**
 
@@ -71,7 +71,7 @@ Para este projeto, optou-se por **manter a reserva no banco de dados e apenas at
 
 ---
 
-## 📡 API REST - Endpoints
+##  API REST - Endpoints
 
 | Método | Endpoint | Descrição |
 | :--- | :--- | :--- |
@@ -80,26 +80,3 @@ Para este projeto, optou-se por **manter a reserva no banco de dados e apenas at
 | `POST` | `/reservas` | Cria uma nova reserva com validação de sobreposição no backend. |
 | `PATCH` | `/reservas/:id/cancelar` | Cancela uma reserva existente (marca `status = 'cancelada'`). |
 
----
-
-## 📹 Roteiro Guia para Gravação do Vídeo de Apresentação (Até 5 Minutos)
-
-Conforme os requisitos do desafio técnico da Spedy, este roteiro foi preparado para servir de guia contínuo durante a gravação da demonstração.
-
-```
-⏱️ DURAÇÃO TOTAL: 5 Minutos (Gravação sem cortes)
-```
-
-| Tempo | Tópico | O que Falar / Mostrar na Tela |
-| :--- | :--- | :--- |
-| **00:00 - 01:30** | **1. Overview & Estrutura** | • Apresente-se brevemente.<br>• Mostre a estrutura de pastas (`backend/` e `frontend/`).<br>• Destaque no backend: `db.js` (instanciação do SQLite e seeds) e `index.js` (rotas e validações).<br>• Destaque no frontend: `App.jsx` e `App.css` (agrupamento por dia e Design System). |
-| **01:30 - 02:30** | **2. Aplicação Rodando** | • Abra o navegador em `http://localhost:5173`.<br>• Selecione uma sala (ex: *Sala Inovação*) e crie uma reserva para as 14:00 às 15:00.<br>• Mostre a reserva aparecendo no grupo do dia.<br>• **Simule a colisão**: Tente criar outra reserva na mesma sala das 14:30 às 15:30 e mostre a mensagem de erro retornada pelo backend. |
-| **02:30 - 03:30** | **3. Validação de Sobreposição** | • Abra o arquivo `backend/index.js` no VS Code (linhas 90-100).<br>• Explique a query SQL: `sala_id = ? AND status = 'ativa' AND fim > ? AND inicio < ?`.<br>• Explique por que essa lógica é infalível para detectar sobreposições totais ou parciais de horários. |
-| **03:30 - 04:30** | **4. Decisão do Cancelamento** | • Volte à aplicação e cancele uma reserva.<br>• Explique a decisão do **Soft Delete** (`status = 'cancelada'`): preservação de histórico, auditoria, métricas de ociosidade do coworking e liberação imediata do horário na sala. |
-| **04:30 - 05:00** | **5. Um Imprevisto & Resolução** | • Conte um aprendizado real durante a solução (ex: o agrupamento por data no frontend ou garantir que fusos horários da string `datetime-local` fossem comparados corretamente na query SQL). |
-
----
-
-## 📝 Licença
-
-Este projeto foi desenvolvido como parte do processo seletivo para a **Spedy**.
